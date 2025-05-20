@@ -1,0 +1,305 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="X-UA-Compatible" content="IE=Edge" />
+    <meta charset="utf-8" />
+    <meta name="title" content="Cursors" />
+    <meta name="description" content="Multiplayer Cursors" />
+    <meta property="og:title" content="Cursors" />
+    <meta property="og:description" content="Multiplayer Cursors" />
+    <meta property="og:type" content="website" />
+    <title>Cursors</title>
+
+    <style>
+      html {
+        background: #ffffff;
+      }
+
+      body {
+        width: 100%;
+        height: 100%;
+        margin: 0;
+        overflow: hidden;
+        font-family: Helvetica, sans-serif;
+      }
+
+      #cursor-place {
+        position: fixed;
+        margin: auto;
+        width: 100%;
+        height: 100%;
+      }
+
+      .cursor {
+        position: absolute;
+        pointer-events: none;
+        z-index: 1000;
+        width: 11px;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        transform: translate(-50%, -50%);
+      }
+
+      .cursor img {
+        width: 100%;
+        height: 100%;
+        display: block;
+      }
+
+      .cursor-label {
+        font-size: 12px;
+        font-weight: bold;
+        margin-top: 4px;
+        white-space: nowrap;
+        background: #090d0f;
+        text-shadow: 0px 0px 10px #ffffff;
+      }
+    </style>
+    <script>
+      var debug = true;
+
+      var network;
+      var myId;
+
+      var cursors = new Map();
+
+      function resize() {
+        network.sendDimensions();
+      }
+
+      const OPCODE_CS_PING = 0x00;
+      const OPCODE_CS_PONG = 0x01;
+      const OPCODE_DIMENSIONS = 0x02;
+      const OPCODE_ENTER_GAME = 0x03;
+      const OPCODE_CURSOR = 0x04;
+
+      const OPCODE_SC_PING = 0x00;
+      const OPCODE_SC_PONG = 0x01;
+      const OPCODE_CURSOR_INFO = 0xa2;
+      const OPCODE_CURSOR_DELETE = 0xa3;
+      const OPCODE_ENTERED_GAME = 0xa1;
+
+
+      class Cursor {
+        constructor(maybeShow) {
+          this.element = document.createElement("div");
+          this.element.className = "cursor";
+
+          this.img = document.createElement("img");
+          this.img.src = "http://brutal.nekoweb.org/cursor.png";
+
+          this.element.appendChild(this.img);
+
+          if (!maybeShow) {
+            document.getElementById("cursor-place").appendChild(this.element);
+          }
+        }
+
+        hide() {
+          this.element.style.display = "none";
+        }
+
+        show() {
+          this.element.style.display = "block";
+        }
+
+        delete() {
+          document.getElementById("cursor-place").removeChild(this.element);
+        }
+
+        updateCursor(x, y) {
+          this.element.style.marginLeft = x + "px";
+          this.element.style.marginTop = y + "px";
+        }
+
+        updateNetwork(view, offset) {
+          let x = (view.getUint16(offset, true) / 65535) * window.innerWidth;
+          offset += 2;
+          let y = (view.getUint16(offset, true) / 65535) * window.innerHeight;
+          offset += 2;
+          this.updateCursor(x, y);
+          return offset;
+        }
+      }
+
+      class Network {
+        constructor() {
+          this.webSocket = null;
+
+          this.address = "ws://192.168.1.7:8081";
+          this.hasConnection = false;
+          this.sentHello = false;
+          this.lastPing = 0;
+        }
+
+        connect() {
+          console.log(1)
+          try {
+            this.webSocket = new WebSocket("ws://192.168.1.9:8081");
+          } catch (e) {
+            setTimeout(() => this.connect(), 1e3);
+            console.log(e);
+            return;
+          }
+          this.webSocket.binaryType = "arraybuffer";
+          this.webSocket.onopen = this.onSocketOpen;
+          this.webSocket.onclose = this.onSocketClose;
+          this.webSocket.onerror = this.onError;
+          this.webSocket.onmessage = this.onSocketMessage;
+        }
+
+        onSocketOpen() {
+          console.log("Connected!");
+          network.hasConnection = true;
+          window.network.hello();
+        }
+
+        onSocketClose() {
+          console.log("disconnected");
+          network.hasConnection = false;
+          setTimeout(() => window.network.connect(), 1e3);
+        }
+
+        onError(a) {
+          console.error(a);
+        }
+
+        onSocketMessage(event) {
+          window.network.processMessage(event.data);
+        }
+
+        hello() {
+          this.ping();
+          this.sendDimensions();
+        }
+
+        ping() {
+          let buffer = new ArrayBuffer(1);
+          let view = new DataView(buffer);
+
+          view.setUint8(0, OPCODE_CS_PING);
+
+          this.webSocket.send(buffer);
+          this.lastPing = +new Date();
+        }
+
+        pong() {
+          let buffer = new ArrayBuffer(1);
+          let view = new DataView(buffer);
+
+          view.setUint8(0, OPCODE_CS_PONG);
+
+          this.webSocket.send(buffer);
+        }
+
+        sendDimensions() {
+          let buffer = new ArrayBuffer(5);
+          let view = new DataView(buffer);
+
+          view.setUint8(0, OPCODE_DIMENSIONS);
+
+          view.setUint16(1, window.innerWidth, true);
+          view.setUint16(3, window.innerHeight, true);
+
+          this.webSocket.send(buffer);
+        }
+
+        sendCursor(x, y) {
+          let buffer = new ArrayBuffer(5);
+          let view = new DataView(buffer);
+
+          view.setUint8(0, OPCODE_CURSOR);
+
+          view.setUint16(1, x, true);
+          view.setUint16(3, y, true);
+
+          this.webSocket.send(buffer);
+        }
+
+        init() {
+          let buffer = new ArrayBuffer(1);
+          let view = new DataView(buffer);
+
+          view.setUint8(0, OPCODE_ENTER_GAME);
+
+          this.webSocket.send(buffer);
+        }
+
+        processMessage(buffer) {
+          let view = new DataView(buffer);
+          let op = view.getUint8(0);
+          switch (op) {
+            case OPCODE_SC_PING:
+              this.pong();
+              break;
+            case OPCODE_SC_PONG:
+              console.log("Pong", +new Date() - this.lastPing);
+              this.init();
+              break;
+            case OPCODE_ENTERED_GAME:
+              window.myId = view.getUint16(1, true);
+              console.log(myId);
+              break;
+            case OPCODE_CURSOR_INFO:
+            case OPCODE_CURSOR_DELETE:
+              this.processCursors(view, op);
+              break;
+            default:
+              break;
+          }
+        }
+
+        processCursors(view, op) {
+          let offset = 1;
+
+          if (op == OPCODE_CURSOR_INFO) {
+            while (true) {
+              let id = view.getUint16(offset, true);
+              offset += 2;
+              if (id == 0x00) break;
+              if(id == myId) {
+                offset += 4;
+                continue;
+              }
+              
+              let cursor = cursors.get(id);
+              if (cursor) {
+                offset = cursor.updateNetwork(view, offset);
+              } else {
+                let cursor = new Cursor();
+                cursors.set(id, cursor);
+                offset = cursor.updateNetwork(view, offset);
+              }
+            }
+          } else if(op == OPCODE_CURSOR_DELETE) {
+            console.log('cursor delete')
+            let id = view.getUint16(offset, true);
+            let cursor = cursors.get(id);
+            if(cursor) cursor.delete()
+            else console.log('unknown cursor', id);
+            cursors.delete(id);
+          }
+        }
+      }
+
+      function init() {
+        network = new Network();
+        network.connect();
+        addListeners();
+      }
+
+      function addListeners() {
+        document.addEventListener("mousemove", (e) => {
+          if (network.hasConnection) network.sendCursor(e.clientX, e.clientY);
+        });
+      }
+
+      window.onload = init;
+      window.onresize = resize;
+    </script>
+  </head>
+  <body>
+    <div id="cursor-place"></div>
+  </body>
+</html>
