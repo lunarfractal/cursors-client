@@ -65,14 +65,15 @@
       var cursors = new Map();
 
       function resize() {
-        network.sendDimensions();
+        network.sendResize();
       }
 
       const OPCODE_CS_PING = 0x00;
       const OPCODE_CS_PONG = 0x01;
-      const OPCODE_DIMENSIONS = 0x02;
+      const OPCODE_HELLO = 0x02;
       const OPCODE_ENTER_GAME = 0x03;
       const OPCODE_CURSOR = 0x04;
+      const OPCODE_RESIZE = 0x05;
 
       const OPCODE_SC_PING = 0x00;
       const OPCODE_SC_PONG = 0x01;
@@ -171,7 +172,7 @@
 
         hello() {
           this.ping();
-          this.sendDimensions();
+          this.sendHello();
         }
 
         ping() {
@@ -193,11 +194,11 @@
           this.webSocket.send(buffer);
         }
 
-        sendDimensions() {
+        sendHello() {
           let buffer = new ArrayBuffer(5);
           let view = new DataView(buffer);
 
-          view.setUint8(0, OPCODE_DIMENSIONS);
+          view.setUint8(0, OPCODE_HELLO);
 
           view.setUint16(1, window.innerWidth, true);
           view.setUint16(3, window.innerHeight, true);
@@ -205,6 +206,18 @@
           this.webSocket.send(buffer);
         }
 
+        sendResize() {
+          let buffer = new ArrayBuffer(5);
+          let view = new DataView(buffer);
+
+          view.setUint8(0, OPCODE_RESIZE);
+
+          view.setUint16(1, window.innerWidth, true);
+          view.setUint16(3, window.innerHeight, true);
+
+          this.webSocket.send(buffer);
+        }
+        
         sendCursor(x, y) {
           let buffer = new ArrayBuffer(5);
           let view = new DataView(buffer);
